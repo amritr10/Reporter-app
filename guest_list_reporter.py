@@ -191,9 +191,40 @@ if uploaded_file is not None:
 
             # --- Shuttle Bus Count ---
             st.markdown("---")
-            sb_mask = df['tags'].str.contains("Shuttle Bus", case=False, na=False)
-            sb_count = len(df[sb_mask])
-            st.metric("🚌 Shuttle Bus Requests", sb_count)
+            sb_cols = st.columns(2)
+            with sb_cols[0]:
+                sb_mask = df['tags'].str.contains("Shuttle Bus", case=False, na=False)
+                sb_count = len(df[sb_mask])
+                st.metric("🚌 Shuttle Bus Tagged", sb_count)
+
+            with sb_cols[1]:
+                transport_col = (
+                    "would you like transportation to our wedding? "
+                    "(please note this event will be alcohol-free)"
+                )
+                party_col = "party"
+
+                if transport_col in df.columns and party_col in df.columns:
+                    transport_yes = df[transport_col].fillna("").str.lower().str.strip()
+                    transport_yes_mask = transport_yes.str.contains("^yes", regex=True)
+
+                    party_series = df[party_col]
+                    party_key = party_series.where(party_series.notna(), other=df.index.astype(str))
+
+                    temp_df = df[[party_col]].copy()
+                    temp_df["party_key"] = party_key
+                    temp_df["transport_yes"] = transport_yes_mask
+
+                    party_yes = temp_df.groupby("party_key")["transport_yes"].any()
+                    potential_individuals = temp_df["party_key"].map(party_yes)
+                    potential_count = int(potential_individuals.sum())
+
+                    st.metric("🚌 Shuttle Bus Potential Individuals", potential_count)
+                else:
+                    missing_cols = [
+                        col for col in [transport_col, party_col] if col not in df.columns
+                    ]
+                    st.warning(f"Missing columns for shuttle bus potential count: {missing_cols}")
 
             # --- Interactive Table ---
             st.markdown("---")
@@ -202,11 +233,12 @@ if uploaded_file is not None:
             # Multiselects
             selected_events = st.multiselect("Filter by Event Invitation", list(events_config.keys()))
             selected_statuses = st.multiselect("Filter by Response Status", ["Accepted", "Declined", "Unanswered"])
+            show_shuttle_potential = st.checkbox("Only potential shuttle bus individuals")
             
             # Filtering Logic
             filtered_df = df.copy()
             
-            if selected_events or selected_statuses:
+            if selected_events or selected_statuses or show_shuttle_potential:
                 # We need to filter rows based on OR logic within categories, but usually AND between categories?
                 # User said: "OR type filtering where I can click on any event or by responses"
                 # If I select Wedding and Reception -> Invited to Wedding OR Reception?
@@ -262,6 +294,42 @@ if uploaded_file is not None:
                     final_mask &= event_mask
                 if selected_statuses:
                     final_mask &= status_mask
+
+                if show_shuttle_potential:
+                    transport_col = (
+                        "would you like transportation to our wedding? "
+                        "(please note this event will be alcohol-free)"
+                    )
+                    party_col = "party"
+
+                    if transport_col in df.columns and party_col in df.columns:
+                        transport_yes = df[transport_col].fillna("").str.lower().str.strip()
+                        transport_yes_mask = transport_yes.str.contains("^yes", regex=True)
+
+                        party_series = df[party_col]
+                        party_key = party_series.where(party_series.notna(), other=df.index.astype(str))
+
+                        temp_df = df[[party_col]].copy()
+                        temp_df["party_key"] = party_key
+                        temp_df["transport_yes"] = transport_yes_mask
+
+                        party_yes = temp_df.groupby("party_key")["transport_yes"].any()
+                        if "wedding rsvp" in df.columns:
+                            wedding_rsvp = df["wedding rsvp"].fillna("").str.lower().str.strip()
+                            declined_mask = wedding_rsvp.str.contains("regretfully decline")
+                        else:
+                            declined_mask = pd.Series([False] * len(df))
+
+                        shuttle_mask = temp_df["party_key"].map(party_yes) & ~declined_mask
+
+                        final_mask &= shuttle_mask
+                    else:
+                        missing_cols = [
+                            col for col in [transport_col, party_col] if col not in df.columns
+                        ]
+                        st.warning(
+                            f"Missing columns for shuttle bus potential filter: {missing_cols}"
+                        )
                 
                 # If user selects NOTHING, show everything? Yes.
                 # If user selects Wedding, show Invited to Wedding.
