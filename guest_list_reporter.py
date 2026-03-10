@@ -3,12 +3,12 @@ import pandas as pd
 import io
 
 # Set page configuration
-st.set_page_config(page_title="Guest List Reporter", page_icon="📋", layout="wide")
+st.set_page_config(page_title="Guest List Reporter", page_icon="\U0001F4CB", layout="wide")
 
 # Set page configuration
-st.set_page_config(page_title="Guest List Reporter", page_icon="📋", layout="wide")
+st.set_page_config(page_title="Guest List Reporter", page_icon="\U0001F4CB", layout="wide")
 
-st.title("📋 Wedding Guest List Reporter")
+st.title("\U0001F4CB Wedding Guest List Reporter")
 
 # --- Sidebar Navigation & Upload ---
 st.sidebar.header("Navigation")
@@ -129,7 +129,7 @@ if uploaded_file is not None:
 
         # --- PAGE 2: RSVP Summary ---
         elif page == "RSVP Summary":
-            st.header("📊 RSVP Summary & Tracking")
+            st.header("\U0001F4CA RSVP Summary & Tracking")
 
             # --- Logic Definitions ---
             events_config = {
@@ -184,47 +184,205 @@ if uploaded_file is not None:
                     expected = total_invited - declined
 
                     st.write(f"**Total Invited:** {total_invited}")
-                    st.write(f"👥 **Expected:** {expected}")
-                    st.write(f"✅ Accepted: {accepted}")
-                    st.write(f"❌ Declined: {declined}")
-                    st.write(f"❓ Unanswered: {unanswered}")
-
+                    st.write(f"\U0001F465 **Expected:** {expected}")
+                    st.write(f"\u2705 Accepted: {accepted}")
+                    st.write(f"\u274C Declined: {declined}")
+                    st.write(f"\u2753 Unanswered: {unanswered}")
             # --- Shuttle Bus Count ---
             st.markdown("---")
-            sb_cols = st.columns(2)
-            with sb_cols[0]:
-                sb_mask = df['tags'].str.contains("Shuttle Bus", case=False, na=False)
-                sb_count = len(df[sb_mask])
-                st.metric("🚌 Shuttle Bus Tagged", sb_count)
+            sb_mask = df['tags'].str.contains("Shuttle Bus", case=False, na=False)
+            sb_count = len(df[sb_mask])
+            st.metric("\U0001F68C Shuttle Bus Requests", sb_count)
 
-            with sb_cols[1]:
-                transport_col = (
-                    "would you like transportation to our wedding? "
-                    "(please note this event will be alcohol-free)"
+            # --- Party-Based Shuttle Transport Report ---
+            transport_col = "would you like transportation to our wedding? (please note this event will be alcohol-free)"
+            if transport_col in df.columns and 'party' in df.columns:
+                shuttle_df = df.copy()
+                shuttle_df['_transport_response'] = shuttle_df[transport_col].fillna("").astype(str).str.strip()
+                shuttle_df['_transport_lower'] = shuttle_df['_transport_response'].str.lower()
+                shuttle_df['_is_yes'] = shuttle_df['_transport_lower'].str.contains("yes", na=False)
+                shuttle_df['_is_no'] = shuttle_df['_transport_lower'].str.contains("no", na=False)
+                shuttle_df['_is_shuttle_tagged'] = shuttle_df['tags'].str.contains("Shuttle Bus", case=False, na=False)
+
+                party_ids = shuttle_df['party'].fillna("").astype(str).str.strip()
+                shuttle_df['_party_group'] = party_ids.where(
+                    party_ids != "",
+                    "unassigned_row_" + shuttle_df.index.astype(str)
                 )
-                party_col = "party"
+                shuttle_df['_party_display'] = party_ids.where(
+                    party_ids != "",
+                    "(No party ID)"
+                )
+                shuttle_df['_party_has_no'] = shuttle_df.groupby('_party_group')['_is_no'].transform('any')
 
-                if transport_col in df.columns and party_col in df.columns:
-                    transport_yes = df[transport_col].fillna("").str.lower().str.strip()
-                    transport_yes_mask = transport_yes.str.contains("^yes", regex=True)
+                first_names = shuttle_df['first name'].fillna("").astype(str).str.strip() if 'first name' in shuttle_df.columns else pd.Series([""] * len(shuttle_df), index=shuttle_df.index)
+                last_names = shuttle_df['last name'].fillna("").astype(str).str.strip() if 'last name' in shuttle_df.columns else pd.Series([""] * len(shuttle_df), index=shuttle_df.index)
+                full_names = (first_names + " " + last_names).str.strip()
+                shuttle_df['_member_name'] = full_names.where(full_names != "", "Unknown Guest")
 
-                    party_series = df[party_col]
-                    party_key = party_series.where(party_series.notna(), other=df.index.astype(str))
+                party_summary = (
+                    shuttle_df
+                    .groupby('_party_group', as_index=False)
+                    .agg(
+                        party_id=('_party_display', 'first'),
+                        party_size=('_party_group', 'size'),
+                        has_yes=('_is_yes', 'any'),
+                        has_no=('_is_no', 'any'),
+                        members=('_member_name', lambda s: ", ".join(s.astype(str).tolist())),
+                        transport_responses=(
+                            '_transport_response',
+                            lambda s: " | ".join(
+                                sorted({v for v in s.astype(str).tolist() if v.strip() != ""})
+                            ) if any(v.strip() != "" for v in s.astype(str).tolist()) else "(blank)"
+                        )
+                    )
+                )
 
-                    temp_df = df[[party_col]].copy()
-                    temp_df["party_key"] = party_key
-                    temp_df["transport_yes"] = transport_yes_mask
+                yes_parties = party_summary[party_summary['has_yes']].copy()
+                yes_parties['counted_shuttle_people'] = yes_parties['party_size']
+                party_based_total = int(yes_parties['counted_shuttle_people'].sum())
+                st.metric("Shuttle Transport Needed (Party-Based)", party_based_total)
 
-                    party_yes = temp_df.groupby("party_key")["transport_yes"].any()
-                    potential_individuals = temp_df["party_key"].map(party_yes)
-                    potential_count = int(potential_individuals.sum())
+                if 'wedding rsvp' in shuttle_df.columns:
+                    shuttle_df['_wedding_rsvp'] = shuttle_df['wedding rsvp'].fillna("").astype(str).str.lower().str.strip()
+                    shuttle_df['_is_wedding_accepted'] = shuttle_df['_wedding_rsvp'].str.contains("accept", na=False)
 
-                    st.metric("🚌 Shuttle Bus Potential Individuals", potential_count)
+                    expected_mask = (
+                        shuttle_df['_is_shuttle_tagged']
+                        & shuttle_df['_is_wedding_accepted']
+                        & (shuttle_df['_is_yes'] | (shuttle_df['_transport_response'] == ""))
+                        & ~shuttle_df['_party_has_no']
+                    )
+                    expected_shuttle_count = int(expected_mask.sum())
+                    st.metric(
+                        "Expected Shuttle Bus Count",
+                        expected_shuttle_count,
+                        help=(
+                            "Count guest if Shuttle-tagged + Wedding Accepted + (Transport Yes or Blank), "
+                            "then exclude the entire party if any member answered No."
+                        )
+                    )
+                    expected_rows = shuttle_df[expected_mask].copy()
+                    party_totals = (
+                        shuttle_df
+                        .groupby('_party_group', as_index=False)
+                        .agg(
+                            party_id=('_party_display', 'first'),
+                            all_party_members=('_member_name', lambda s: ", ".join(s.astype(str).tolist()))
+                        )
+                    )
+                    expected_parties = (
+                        expected_rows
+                        .groupby('_party_group', as_index=False)
+                        .agg(
+                            counted_shuttle_people=('_party_group', 'size'),
+                            members=('_member_name', lambda s: ", ".join(s.astype(str).tolist()))
+                        )
+                    )
+                    tagged_rows = shuttle_df[shuttle_df['_is_shuttle_tagged']].copy()
+                    tagged_parties = (
+                        tagged_rows
+                        .groupby('_party_group', as_index=False)
+                        .agg(
+                            party_id=('_party_display', 'first'),
+                            party_size=('_party_group', 'size'),
+                            transport_responses=(
+                                '_transport_response',
+                                lambda s: " | ".join(
+                                    sorted({v for v in s.astype(str).tolist() if v.strip() != ""})
+                                ) if any(v.strip() != "" for v in s.astype(str).tolist()) else "(blank)"
+                            )
+                        )
+                    )
+                    shuttle_table_parties = (
+                        tagged_parties
+                        .merge(
+                            party_totals[['_party_group', 'all_party_members']],
+                            on='_party_group',
+                            how='left'
+                        )
+                        .merge(
+                            expected_parties[['_party_group', 'counted_shuttle_people', 'members']],
+                            on='_party_group',
+                            how='left'
+                        )
+                    )
+                    shuttle_table_parties['counted_shuttle_people'] = (
+                        shuttle_table_parties['counted_shuttle_people'].fillna(0).astype(int)
+                    )
+                    shuttle_table_parties['members'] = shuttle_table_parties['members'].fillna("(none)")
+                    st.caption(
+                        f"Included rows (sum of table Counted Shuttle People): {expected_shuttle_count}"
+                    )
                 else:
-                    missing_cols = [
-                        col for col in [transport_col, party_col] if col not in df.columns
-                    ]
-                    st.warning(f"Missing columns for shuttle bus potential count: {missing_cols}")
+                    st.warning(
+                        "Expected Shuttle Bus Count skipped. Missing required column(s): wedding rsvp"
+                    )
+                    tagged_rows = shuttle_df[shuttle_df['_is_shuttle_tagged']].copy()
+                    shuttle_table_parties = (
+                        tagged_rows
+                        .groupby('_party_group', as_index=False)
+                        .agg(
+                            party_id=('_party_display', 'first'),
+                            party_size=('_party_group', 'size'),
+                            counted_shuttle_people=('_party_group', 'size'),
+                            all_party_members=('_member_name', lambda s: ", ".join(s.astype(str).tolist())),
+                            members=('_member_name', lambda s: ", ".join(s.astype(str).tolist())),
+                            transport_responses=(
+                                '_transport_response',
+                                lambda s: " | ".join(
+                                    sorted({v for v in s.astype(str).tolist() if v.strip() != ""})
+                                ) if any(v.strip() != "" for v in s.astype(str).tolist()) else "(blank)"
+                            )
+                        )
+                    )
+
+                st.subheader("Shuttle Transport - Counted Parties")
+                if shuttle_table_parties.empty:
+                    st.info("No shuttle-tagged parties found.")
+                else:
+                    st.dataframe(
+                        shuttle_table_parties[
+                            ['party_id', 'party_size', 'counted_shuttle_people', 'all_party_members', 'members', 'transport_responses']
+                        ].rename(
+                            columns={
+                                'party_id': 'Party',
+                                'party_size': 'Party Size',
+                                'counted_shuttle_people': 'Counted Shuttle People',
+                                'all_party_members': 'All Party Members',
+                                'members': 'Members',
+                                'transport_responses': 'Transport Responses'
+                            }
+                        )
+                    )
+
+                in_question = party_summary[party_summary['has_yes'] & party_summary['has_no']].copy()
+                st.subheader("Shuttle Transport - Parties In Question (Yes + No)")
+                if in_question.empty:
+                    st.success("No conflicting parties found (no party has both yes and no responses).")
+                else:
+                    st.dataframe(
+                        in_question[
+                            ['party_id', 'party_size', 'members', 'transport_responses']
+                        ].rename(
+                            columns={
+                                'party_id': 'Party',
+                                'party_size': 'Party Size',
+                                'members': 'Members',
+                                'transport_responses': 'Transport Responses'
+                            }
+                        )
+                    )
+            else:
+                missing_cols = []
+                if transport_col not in df.columns:
+                    missing_cols.append(transport_col)
+                if 'party' not in df.columns:
+                    missing_cols.append('party')
+                st.warning(
+                    "Party-based shuttle report skipped. Missing required column(s): "
+                    + ", ".join(missing_cols)
+                )
 
             # --- Interactive Table ---
             st.markdown("---")
@@ -233,12 +391,11 @@ if uploaded_file is not None:
             # Multiselects
             selected_events = st.multiselect("Filter by Event Invitation", list(events_config.keys()))
             selected_statuses = st.multiselect("Filter by Response Status", ["Accepted", "Declined", "Unanswered"])
-            show_shuttle_potential = st.checkbox("Only potential shuttle bus individuals")
             
             # Filtering Logic
             filtered_df = df.copy()
             
-            if selected_events or selected_statuses or show_shuttle_potential:
+            if selected_events or selected_statuses:
                 # We need to filter rows based on OR logic within categories, but usually AND between categories?
                 # User said: "OR type filtering where I can click on any event or by responses"
                 # If I select Wedding and Reception -> Invited to Wedding OR Reception?
@@ -294,42 +451,6 @@ if uploaded_file is not None:
                     final_mask &= event_mask
                 if selected_statuses:
                     final_mask &= status_mask
-
-                if show_shuttle_potential:
-                    transport_col = (
-                        "would you like transportation to our wedding? "
-                        "(please note this event will be alcohol-free)"
-                    )
-                    party_col = "party"
-
-                    if transport_col in df.columns and party_col in df.columns:
-                        transport_yes = df[transport_col].fillna("").str.lower().str.strip()
-                        transport_yes_mask = transport_yes.str.contains("^yes", regex=True)
-
-                        party_series = df[party_col]
-                        party_key = party_series.where(party_series.notna(), other=df.index.astype(str))
-
-                        temp_df = df[[party_col]].copy()
-                        temp_df["party_key"] = party_key
-                        temp_df["transport_yes"] = transport_yes_mask
-
-                        party_yes = temp_df.groupby("party_key")["transport_yes"].any()
-                        if "wedding rsvp" in df.columns:
-                            wedding_rsvp = df["wedding rsvp"].fillna("").str.lower().str.strip()
-                            declined_mask = wedding_rsvp.str.contains("regretfully decline")
-                        else:
-                            declined_mask = pd.Series([False] * len(df))
-
-                        shuttle_mask = temp_df["party_key"].map(party_yes) & ~declined_mask
-
-                        final_mask &= shuttle_mask
-                    else:
-                        missing_cols = [
-                            col for col in [transport_col, party_col] if col not in df.columns
-                        ]
-                        st.warning(
-                            f"Missing columns for shuttle bus potential filter: {missing_cols}"
-                        )
                 
                 # If user selects NOTHING, show everything? Yes.
                 # If user selects Wedding, show Invited to Wedding.
@@ -343,3 +464,4 @@ if uploaded_file is not None:
         st.error(f"An error occurred: {e}")
 else:
     st.info("Please upload a CSV file to begin.")
+
